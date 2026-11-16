@@ -1,68 +1,101 @@
-import requests
-from urllib.parse import quote, parse_qs
-import sys
+name: Generate M3U8 Playlists
 
-CHANNELS = {
-    'aloula': 'https://cdn.live.easybroadcast.io/abr_corp/73_aloula_w1dqfwm/corp/73_aloula_w1dqfwm_480p/chunks_dvr.m3u8',
-    'laayoune': 'https://cdn.live.easybroadcast.io/abr_corp/73_laayoune_pgagr52/corp/73_laayoune_pgagr52_480p/chunks_dvr.m3u8',
-    'arryadia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia_k2tgcj0/corp/73_arryadia_k2tgcj0_480p/chunks_dvr.m3u8',
-    'arrabia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arrabia_hthcj4p/corp/73_arrabia_hthcj4p_480p/chunks_dvr.m3u8',
-    'almaghribia': 'https://cdn.live.easybroadcast.io/abr_corp/73_almaghribia_83tz85q/corp/73_almaghribia_83tz85q_480p/chunks_dvr.m3u8',
-    'assadissa': 'https://cdn.live.easybroadcast.io/abr_corp/73_assadissa_7b7u5n1/corp/73_assadissa_7b7u5n1_480p/chunks_dvr.m3u8',
-    'tamazight': 'https://cdn.live.easybroadcast.io/abr_corp/73_tamazight_tccybxt/corp/73_tamazight_tccybxt_480p/chunks_dvr.m3u8',
-    'riyatnt': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia-tnt_zcmwjdc/corp/73_arryadia-tnt_zcmwjdc_480p/chunks_dvr.m3u8',
-}
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
 
-def get_stream_url(channel_url):
-    token_url = f'https://token.easybroadcast.io/all?url={quote(channel_url, safe="")}'
-    try:
-        response = requests.get(token_url, timeout=15)
-        response.raise_for_status()
-        
-        params = parse_qs(response.text)
-        token = params.get('token', [''])[0]
-        token_path = params.get('token_path', [''])[0]
-        expires = params.get('expires', [''])[0]
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-        if token and token_path and expires:
-            separator = '&' if '?' in channel_url else '?'
-            return f"{channel_url}{separator}token={quote(token)}&token_path={quote(token_path)}&expires={quote(expires)}"
-        return None
-    except requests.RequestException as e:
-        print(f"Error fetching token for {channel_url}: {e}", file=sys.stderr)
-        return None
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-def main():
-    all_channels_m3u8 = ["#EXTM3U"]
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    for ch_id, ch_url in CHANNELS.items():
-        print(f"Processing channel: {ch_id}")
-        final_url = get_stream_url(ch_url)
+      - name: Install dependencies
+        run: pip install requests
 
-        if final_url:
-            # 1. Individual HLS Master Manifest (Fixes the issue)
-            # No #EXTINF here. Uses #EXT-X-STREAM-INF which tells the player it's an HLS stream.
-            single_channel_hls = [
-                "#EXTM3U",
-                "#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480",
-                final_url
-            ]
-            with open(f"{ch_id}.m3u8", "w", encoding="utf-8") as f:
-                f.write("\n".join(single_channel_hls))
-                
-            # 2. Combined IPTV Playlist (Remains #EXTINF for IPTV players)
-            all_channels_m3u8.extend([
-                f'#EXTINF:-1 tvg-id="{ch_id}",{ch_id.capitalize()}',
-                final_url
-            ])
-            print(f"Successfully generated files for: {ch_id}")
-        else:
-            print(f"Failed to generate URL for: {ch_id}", file=sys.stderr)
+      - name: Fetch Tokens and Build M3U8
+        run: |
+          python << 'EOF'
+          import requests
+          from urllib.parse import quote, parse_qs
+          import sys
 
-    # Save combined playlist
-    with open("all_channels.m3u8", "w", encoding="utf-8") as f:
-        f.write("\n".join(all_channels_m3u8))
-    print("All files generated successfully.")
+          CHANNELS = {
+              'aloula': 'https://cdn.live.easybroadcast.io/abr_corp/73_aloula_w1dqfwm/corp/73_aloula_w1dqfwm_480p/chunks_dvr.m3u8',
+              'laayoune': 'https://cdn.live.easybroadcast.io/abr_corp/73_laayoune_pgagr52/corp/73_laayoune_pgagr52_480p/chunks_dvr.m3u8',
+              'arryadia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia_k2tgcj0/corp/73_arryadia_k2tgcj0_480p/chunks_dvr.m3u8',
+              'arrabia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arrabia_hthcj4p/corp/73_arrabia_hthcj4p_480p/chunks_dvr.m3u8',
+              'almaghribia': 'https://cdn.live.easybroadcast.io/abr_corp/73_almaghribia_83tz85q/corp/73_almaghribia_83tz85q_480p/chunks_dvr.m3u8',
+              'assadissa': 'https://cdn.live.easybroadcast.io/abr_corp/73_assadissa_7b7u5n1/corp/73_assadissa_7b7u5n1_480p/chunks_dvr.m3u8',
+              'tamazight': 'https://cdn.live.easybroadcast.io/abr_corp/73_tamazight_tccybxt/corp/73_tamazight_tccybxt_480p/chunks_dvr.m3u8',
+              'riyatnt': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia-tnt_zcmwjdc/corp/73_arryadia-tnt_zcmwjdc_480p/chunks_dvr.m3u8',
+          }
 
-if __name__ == "__main__":
-    main()
+          def get_stream_url(channel_url):
+              token_url = f'https://token.easybroadcast.io/all?url={quote(channel_url, safe="")}'
+              try:
+                  response = requests.get(token_url, timeout=15)
+                  response.raise_for_status()
+                  
+                  params = parse_qs(response.text)
+                  token = params.get('token', [''])[0]
+                  token_path = params.get('token_path', [''])[0]
+                  expires = params.get('expires', [''])[0]
+
+                  if token and token_path and expires:
+                      separator = '&' if '?' in channel_url else '?'
+                      return f"{channel_url}{separator}token={quote(token)}&token_path={quote(token_path)}&expires={quote(expires)}"
+                  return None
+              except requests.RequestException as e:
+                  print(f"Error fetching token for {channel_url}: {e}", file=sys.stderr)
+                  return None
+
+          def main():
+              all_channels_m3u8 = ["#EXTM3U"]
+
+              for ch_id, ch_url in CHANNELS.items():
+                  print(f"Processing channel: {ch_id}")
+                  final_url = get_stream_url(ch_url)
+
+                  if final_url:
+                      single_channel_hls = [
+                          "#EXTM3U",
+                          "#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480",
+                          final_url
+                      ]
+                      with open(f"{ch_id}.m3u8", "w", encoding="utf-8") as f:
+                          f.write("\n".join(single_channel_hls))
+                          
+                      all_channels_m3u8.extend([
+                          f'#EXTINF:-1 tvg-id="{ch_id}",{ch_id.capitalize()}',
+                          final_url
+                      ])
+                      print(f"Successfully generated files for: {ch_id}")
+                  else:
+                      print(f"Failed to generate URL for: {ch_id}", file=sys.stderr)
+
+              with open("all_channels.m3u8", "w", encoding="utf-8") as f:
+                  f.write("\n".join(all_channels_m3u8))
+              print("All files generated successfully.")
+
+          if __name__ == "__main__":
+              main()
+          EOF
+
+      - name: Commit and push all M3U8 files
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add *.m3u8
+          git commit -m "Update M3U8 playlists" || exit 0
+          git push
