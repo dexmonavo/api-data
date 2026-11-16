@@ -1,4 +1,4 @@
-name: Generate M3U8 Playlist (Bypass)
+name: Generate Individual M3U8 Files
 
 on:
   workflow_dispatch:
@@ -27,56 +27,73 @@ jobs:
         run: |
           python << 'EOF'
           import cloudscraper
+          import re
 
           # 👇 ضع القنوات هنا (الاسم في الـ API : الاسم في المشغل)
           channels = {
               "aloula": "Al Oula TV",
-              # "mbc": "MBC 1", 
+              "almaghribia": "Al Maghribia",
+              "riyadiya": "Arryadia",
+              # زيد لي بغيتي هنا...
           }
 
-          m3u8_lines = ["#EXTM3U"]
-
-          # إنشاء المتصفح الوهمي الخاص بـ cloudscraper
           scraper = cloudscraper.create_scraper(
-              browser={
-                  'browser': 'chrome',
-                  'platform': 'windows',
-                  'desktop': True
-              }
+              browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
           )
 
           for ch_id, ch_name in channels.items():
               api_url = f"https://k101.fallakatv.eu.org/api/morrco/ts.php?channel={ch_id}"
-              print(f"Fetching {ch_id}...")
+              print(f"--- Fetching {ch_id} ---")
+              
+              # كل قناة هياخد ملف خاص بيها
+              current_m3u8 = ["#EXTM3U"]
               
               try:
-                  # نطلب الرابط، ونخليه يتبع الـ 302 Redirect تلقائياً
-                  # stream=True عشان ميحملش الفيديو كله، بس يقرا الهيدر ويجيب الرابط النهائي
-                  res = scraper.get(api_url, allow_redirects=True, stream=True, timeout=30)
+                  # allow_redirects=False عشان نمسك الـ 302
+                  res = scraper.get(api_url, allow_redirects=False, stream=True, timeout=30)
                   
-                  # res.url بيحتوي على الرابط النهائي بعد الـ 302
-                  final_url = res.url
+                  print(f"Status Code: {res.status_code}")
+                  print(f"Location Header: {res.headers.get('Location')}")
+                  
+                  final_url = ""
+                  
+                  # إذا كان 302 أو 301
+                  if res.status_code in [301, 302, 303, 307, 308]:
+                      final_url = res.headers.get('Location')
+                  else:
+                      # إذا رد بـ 200، نشوف النص
+                      text = res.text
+                      if text.strip().startswith('http'):
+                          final_url = text.strip()
+                      else:
+                          urls = re.findall(r'https?://[^\s"\'<>]+', text)
+                          if urls:
+                              final_url = urls[0]
 
-                  if final_url and final_url != api_url:
-                      m3u8_lines.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
-                      m3u8_lines.append(final_url)
+                  if final_url:
+                      current_m3u8.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
+                      current_m3u8.append(final_url)
                       print(f"✅ Success: {ch_id} -> {final_url}")
                   else:
-                      print(f"⚠️ Warning: No redirect happened. URL: {final_url}")
+                      print(f"❌ Could not extract URL for {ch_id}.")
 
               except Exception as e:
                   print(f"⚠️ Error fetching {ch_id}: {e}")
 
-          # حفظ الملف
-          with open("playlist.m3u8", "w", encoding="utf-8") as f:
-              f.write("\n".join(m3u8_lines))
-          print("Playlist file (playlist.m3u8) generated successfully!")
+              # حفظ الملف باسم القناة
+              file_name = f"{ch_id}.m3u8"
+              with open(file_name, "w", encoding="utf-8") as f:
+                  f.write("\n".join(current_m3u8))
+              print(f"💾 File saved: {file_name}")
+
+          print("All files generated successfully!")
           EOF
 
-      - name: Commit and push the M3U8 file
+      - name: Commit and push all M3U8 files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add playlist.m3u8
-          git commit -m "Update M3U8 playlist" || exit 0
+          # نستخدم *.m3u8 عشان نرفع كل الملفات اللي اتولدت
+          git add *.m3u8
+          git commit -m "Update individual M3U8 files" || exit 0
           git push
