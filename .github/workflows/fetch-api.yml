@@ -1,4 +1,4 @@
-name: Fetch Aloula API Data
+name: Generate M3U8 Playlist
 
 on:
   workflow_dispatch:
@@ -15,16 +15,78 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch API Data
-        uses: JamesIves/fetch-api-data-action@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          endpoint: 'https://k101.fallakatv.eu.org/api/morrco/ts.php?channel=aloula'
-          configuration: '{ "method": "GET" }'
+          python-version: '3.11'
 
-      - name: Commit and push the JSON file
+      - name: Install curl_cffi
+        run: pip install curl_cffi
+
+      - name: Fetch Channels and Build M3U8
+        run: |
+          python << 'EOF'
+          from curl_cffi import requests
+          import json
+
+          # 👇 هنا تضيف كل القنوات التي تريدها (الاسم البرمجي للـ API : الاسم الذي سيظهر في المشغل)
+          channels = {
+              "aloula": "Al Oula TV",
+              "channel2_name": "Channel 2",
+              "channel3_name": "Channel 3"
+              # أضف المزيد هنا بنفس الطريقة، افصل بينها بفاصلة
+          }
+
+          m3u8_lines = ["#EXTM3U"]
+
+          for ch_id, ch_name in channels.items():
+              api_url = f"https://k101.fallakatv.eu.org/api/morrco/ts.php?channel={ch_id}"
+              print(f"Fetching {ch_id}...")
+              
+              try:
+                  # استخدام متصفح كروم وهمي لتجاوز الحماية
+                  res = requests.get(api_url, impersonate="chrome", timeout=30)
+                  final_url = ""
+                  
+                  # 1. هل الاستجابة بصيغة JSON؟
+                  try:
+                      data = res.json()
+                      if 'url' in data:
+                          final_url = data['url']
+                      elif 'link' in data:
+                          final_url = data['link']
+                  except:
+                      pass
+                  
+                  # 2. هل الاستجابة نص عادي يبدأ بـ http؟
+                  if not final_url and res.text.strip().startswith('http'):
+                      final_url = res.text.strip()
+                      
+                  # 3. هل الـ API قام بعمل Redirect (تحويل) لرابط آخر؟
+                  if not final_url and res.url != api_url:
+                      final_url = res.url
+
+                  # إذا وجدنا الرابط، نضيفه لملف M3U8
+                  if final_url:
+                      m3u8_lines.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
+                      m3u8_lines.append(final_url)
+                      print(f"✅ Success: {ch_id}")
+                  else:
+                      print(f"❌ Could not extract URL for {ch_id}")
+
+              except Exception as e:
+                  print(f"⚠️ Error fetching {ch_id}: {e}")
+
+          # حفظ الملف
+          with open("playlist.m3u8", "w", encoding="utf-8") as f:
+              f.write("\n".join(m3u8_lines))
+          print("Playlist file generated successfully!")
+          EOF
+
+      - name: Commit and push the M3U8 file
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add fetch-api-data-action/data.json
-          git commit -m "Update Aloula API data" || exit 0
+          git add playlist.m3u8
+          git commit -m "Update M3U8 playlist" || exit 0
           git push
