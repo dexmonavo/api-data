@@ -1,0 +1,30 @@
+name: Fetch Aloula API Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch API Data
+        uses: JamesIves/fetch-api-data-action@v2
+        with:
+          endpoint: 'https://k101.fallakatv.eu.org/api/morrco/ts.php?channel=aloula'
+          configuration: '{ "method": "GET" }'
+
+      - name: Commit and push the JSON file
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add fetch-api-data-action/data.json
+          git commit -m "Update Aloula API data" || exit 0
+          git push
