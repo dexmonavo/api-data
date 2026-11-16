@@ -1,4 +1,4 @@
-name: Generate M3U8 Playlist (Playwright)
+name: Generate M3U8 Playlist (Bypass)
 
 on:
   workflow_dispatch:
@@ -20,75 +20,57 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Playwright and Patchright
-        run: |
-          pip install playwright patchright
-          # تثبيت متصفح كروم الحقيقي
-          playwright install chromium
+      - name: Install cloudscraper
+        run: pip install cloudscraper
 
       - name: Fetch Channels and Build M3U8
         run: |
           python << 'EOF'
-          import asyncio
-          from patchright.async_api import async_playwright
+          import cloudscraper
 
-          # 👇 هنا تضيف كل القنوات التي تريدها
+          # 👇 ضع القنوات هنا (الاسم في الـ API : الاسم في المشغل)
           channels = {
               "aloula": "Al Oula TV",
-              # "channel2_name": "Channel 2",
+              # "mbc": "MBC 1", 
           }
 
-          async def main():
-              m3u8_lines = ["#EXTM3U"]
+          m3u8_lines = ["#EXTM3U"]
+
+          # إنشاء المتصفح الوهمي الخاص بـ cloudscraper
+          scraper = cloudscraper.create_scraper(
+              browser={
+                  'browser': 'chrome',
+                  'platform': 'windows',
+                  'desktop': True
+              }
+          )
+
+          for ch_id, ch_name in channels.items():
+              api_url = f"https://k101.fallakatv.eu.org/api/morrco/ts.php?channel={ch_id}"
+              print(f"Fetching {ch_id}...")
               
-              async with async_playwright() as p:
-                  # تشغيل المتصفح في وضع عدم العرض (headless) مع بعض الإعدادات
-                  browser = await p.chromium.launch(headless=True)
-                  context = await browser.new_context(
-                      user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                  )
-                  page = await context.new_page()
+              try:
+                  # نطلب الرابط، ونخليه يتبع الـ 302 Redirect تلقائياً
+                  # stream=True عشان ميحملش الفيديو كله، بس يقرا الهيدر ويجيب الرابط النهائي
+                  res = scraper.get(api_url, allow_redirects=True, stream=True, timeout=30)
+                  
+                  # res.url بيحتوي على الرابط النهائي بعد الـ 302
+                  final_url = res.url
 
-                  for ch_id, ch_name in channels.items():
-                      api_url = f"https://k101.fallakatv.eu.org/api/morrco/ts.php?channel={ch_id}"
-                      print(f"Fetching {ch_id}...")
-                      final_url = ""
-                      
-                      try:
-                          # الانتقال إلى الرابط وانتظار انتهاء تحدي Cloudflare
-                          await page.goto(api_url, wait_until="networkidle", timeout=60000)
-                          
-                          # الحصول على محتوى الصفحة بعد الحل
-                          content = await page.content()
-                          text = await page.inner_text("body")
-                          
-                          # محاولة استخراج الرابط من النص
-                          if text.strip().startswith('http'):
-                              final_url = text.strip()
-                          # أو البحث عن الرابط في أي مكان داخل محتوى الصفحة
-                          elif 'http' in content:
-                              import re
-                              urls = re.findall(r'https?://[^\s"\']+', content)
-                              if urls:
-                                  final_url = urls[0]
+                  if final_url and final_url != api_url:
+                      m3u8_lines.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
+                      m3u8_lines.append(final_url)
+                      print(f"✅ Success: {ch_id} -> {final_url}")
+                  else:
+                      print(f"⚠️ Warning: No redirect happened. URL: {final_url}")
 
-                          if final_url:
-                              m3u8_lines.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
-                              m3u8_lines.append(final_url)
-                              print(f"✅ Success: {ch_id}")
-                          else:
-                              print(f"❌ Could not extract URL for {ch_id}")
+              except Exception as e:
+                  print(f"⚠️ Error fetching {ch_id}: {e}")
 
-                      except Exception as e:
-                          print(f"⚠️ Error fetching {ch_id}: {e}")
-
-                  await browser.close()
-
-              with open("playlist.m3u8", "w", encoding="utf-8") as f:
-                  f.write("\n".join(m3u8_lines))
-              print("Playlist file generated successfully!")
-
-          asyncio.run(main())
+          # حفظ الملف
+          with open("playlist.m3u8", "w", encoding="utf-8") as f:
+              f.write("\n".join(m3u8_lines))
+          print("Playlist file (playlist.m3u8) generated successfully!")
           EOF
 
       - name: Commit and push the M3U8 file
@@ -96,5 +78,5 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add playlist.m3u8
-          git commit -m "Update M3U8 playlist (Playwright)" || exit 0
+          git commit -m "Update M3U8 playlist" || exit 0
           git push
