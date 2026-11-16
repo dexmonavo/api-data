@@ -1,4 +1,4 @@
-name: Generate Individual M3U8 Files
+name: Generate M3U8 Playlists
 
 on:
   workflow_dispatch:
@@ -20,80 +20,83 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install cloudscraper
-        run: pip install cloudscraper
+      - name: Install dependencies
+        run: pip install requests
 
-      - name: Fetch Channels and Build M3U8
+      - name: Fetch Tokens and Build M3U8
         run: |
           python << 'EOF'
-          import cloudscraper
-          import re
+          import requests
+          from urllib.parse import quote, parse_qs
+          import sys
 
-          # 👇 ضع القنوات هنا (الاسم في الـ API : الاسم في المشغل)
-          channels = {
-              "aloula": "Al Oula TV",
-              "almaghribia": "Al Maghribia",
-              "riyadiya": "Arryadia",
-              # زيد لي بغيتي هنا...
+          CHANNELS = {
+              'aloula': 'https://cdn.live.easybroadcast.io/abr_corp/73_aloula_w1dqfwm/corp/73_aloula_w1dqfwm_480p/chunks_dvr.m3u8',
+              'laayoune': 'https://cdn.live.easybroadcast.io/abr_corp/73_laayoune_pgagr52/corp/73_laayoune_pgagr52_480p/chunks_dvr.m3u8',
+              'arryadia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia_k2tgcj0/corp/73_arryadia_k2tgcj0_480p/chunks_dvr.m3u8',
+              'arrabia': 'https://cdn.live.easybroadcast.io/abr_corp/73_arrabia_hthcj4p/corp/73_arrabia_hthcj4p_480p/chunks_dvr.m3u8',
+              'almaghribia': 'https://cdn.live.easybroadcast.io/abr_corp/73_almaghribia_83tz85q/corp/73_almaghribia_83tz85q_480p/chunks_dvr.m3u8',
+              'assadissa': 'https://cdn.live.easybroadcast.io/abr_corp/73_assadissa_7b7u5n1/corp/73_assadissa_7b7u5n1_480p/chunks_dvr.m3u8',
+              'tamazight': 'https://cdn.live.easybroadcast.io/abr_corp/73_tamazight_tccybxt/corp/73_tamazight_tccybxt_480p/chunks_dvr.m3u8',
+              'riyatnt': 'https://cdn.live.easybroadcast.io/abr_corp/73_arryadia-tnt_zcmwjdc/corp/73_arryadia-tnt_zcmwjdc_480p/chunks_dvr.m3u8',
           }
 
-          scraper = cloudscraper.create_scraper(
-              browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-          )
-
-          for ch_id, ch_name in channels.items():
-              api_url = f"https://k101.fallakatv.eu.org/api/morrco/ts.php?channel={ch_id}"
-              print(f"--- Fetching {ch_id} ---")
-              
-              # كل قناة هياخد ملف خاص بيها
-              current_m3u8 = ["#EXTM3U"]
-              
+          def get_stream_url(channel_url):
+              token_url = f'https://token.easybroadcast.io/all?url={quote(channel_url, safe="")}'
               try:
-                  # allow_redirects=False عشان نمسك الـ 302
-                  res = scraper.get(api_url, allow_redirects=False, stream=True, timeout=30)
+                  response = requests.get(token_url, timeout=15)
+                  response.raise_for_status()
                   
-                  print(f"Status Code: {res.status_code}")
-                  print(f"Location Header: {res.headers.get('Location')}")
-                  
-                  final_url = ""
-                  
-                  # إذا كان 302 أو 301
-                  if res.status_code in [301, 302, 303, 307, 308]:
-                      final_url = res.headers.get('Location')
-                  else:
-                      # إذا رد بـ 200، نشوف النص
-                      text = res.text
-                      if text.strip().startswith('http'):
-                          final_url = text.strip()
-                      else:
-                          urls = re.findall(r'https?://[^\s"\'<>]+', text)
-                          if urls:
-                              final_url = urls[0]
+                  params = parse_qs(response.text)
+                  token = params.get('token', [''])[0]
+                  token_path = params.get('token_path', [''])[0]
+                  expires = params.get('expires', [''])[0]
+
+                  if token and token_path and expires:
+                      separator = '&' if '?' in channel_url else '?'
+                      return f"{channel_url}{separator}token={quote(token)}&token_path={quote(token_path)}&expires={quote(expires)}"
+                  return None
+              except requests.RequestException as e:
+                  print(f"Error fetching token for {channel_url}: {e}", file=sys.stderr)
+                  return None
+
+          def main():
+              all_channels_m3u8 = ["#EXTM3U"]
+
+              for ch_id, ch_url in CHANNELS.items():
+                  print(f"Processing channel: {ch_id}")
+                  final_url = get_stream_url(ch_url)
 
                   if final_url:
-                      current_m3u8.append(f'#EXTINF:-1 tvg-id="{ch_id}" tvg-name="{ch_name}",{ch_name}')
-                      current_m3u8.append(final_url)
-                      print(f"✅ Success: {ch_id} -> {final_url}")
+                      single_channel_content = [
+                          "#EXTM3U",
+                          f'#EXTINF:-1 tvg-id="{ch_id}",{ch_id.capitalize()}',
+                          final_url
+                      ]
+                      
+                      with open(f"{ch_id}.m3u8", "w", encoding="utf-8") as f:
+                          f.write("\n".join(single_channel_content))
+                      
+                      all_channels_m3u8.extend([
+                          f'#EXTINF:-1 tvg-id="{ch_id}",{ch_id.capitalize()}',
+                          final_url
+                      ])
+                      print(f"Successfully generated playlist for: {ch_id}")
                   else:
-                      print(f"❌ Could not extract URL for {ch_id}.")
+                      print(f"Failed to generate playlist for: {ch_id}", file=sys.stderr)
 
-              except Exception as e:
-                  print(f"⚠️ Error fetching {ch_id}: {e}")
+              with open("all_channels.m3u8", "w", encoding="utf-8") as f:
+                  f.write("\n".join(all_channels_m3u8))
+              print("All playlists generated successfully.")
 
-              # حفظ الملف باسم القناة
-              file_name = f"{ch_id}.m3u8"
-              with open(file_name, "w", encoding="utf-8") as f:
-                  f.write("\n".join(current_m3u8))
-              print(f"💾 File saved: {file_name}")
-
-          print("All files generated successfully!")
+          if __name__ == "__main__":
+              main()
           EOF
 
       - name: Commit and push all M3U8 files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          # نستخدم *.m3u8 عشان نرفع كل الملفات اللي اتولدت
           git add *.m3u8
-          git commit -m "Update individual M3U8 files" || exit 0
+          git commit -m "Update M3U8 playlists" || exit 0
           git push
