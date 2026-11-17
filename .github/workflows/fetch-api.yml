@@ -61,41 +61,35 @@ jobs:
                   return None
 
           def main():
-              all_channels_m3u8 = ["#EXTM3U"]
-
               for ch_id, ch_url in CHANNELS.items():
                   print(f"Processing channel: {ch_id}")
                   final_url = get_stream_url(ch_url)
 
                   if final_url:
+                      # Create individual HLS Master Manifest
                       single_channel_hls = [
                           "#EXTM3U",
                           "#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480",
                           final_url
                       ]
+                      
                       with open(f"{ch_id}.m3u8", "w", encoding="utf-8") as f:
                           f.write("\n".join(single_channel_hls))
                           
-                      all_channels_m3u8.extend([
-                          f'#EXTINF:-1 tvg-id="{ch_id}",{ch_id.capitalize()}',
-                          final_url
-                      ])
-                      print(f"Successfully generated files for: {ch_id}")
+                      print(f"Successfully generated file for: {ch_id}")
                   else:
                       print(f"Failed to generate URL for: {ch_id}", file=sys.stderr)
 
-              with open("all_channels.m3u8", "w", encoding="utf-8") as f:
-                  f.write("\n".join(all_channels_m3u8))
-              print("All files generated successfully.")
+              print("All individual files generated successfully.")
 
           if __name__ == "__main__":
               main()
           EOF
 
-      - name: Commit and push all M3U8 files
+      - name: Commit and push M3U8 files
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add *.m3u8
-          git commit -m "Update M3U8 playlists" || exit 0
+          git commit -m "Update individual M3U8 playlists" || exit 0
           git push
